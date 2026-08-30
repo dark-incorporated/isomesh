@@ -46,6 +46,22 @@
 //! `bevy_render` and this crate is built on leaf crates so that a consumer doing
 //! CPU-only meshing never compiles the renderer. One line in the consumer buys
 //! that, and the examples show it.
+//!
+//! # What it does say about the mesh it hands over
+//!
+//! Nothing it stops short of doing, and one thing it *can* answer for free.
+//! Chunks are meshed independently and handed over **unwelded** — the seam
+//! vertices are computed twice and kept twice — so any consumer that welds is
+//! making a decision about topology. A collider builder is the usual one:
+//! `isomesh::collider::readiness` names the unwelded buffer as the case that
+//! gets the seams in full.
+//!
+//! So every chunk arrives with a [`ChunkPinch`] beside its [`ChunkMesh`],
+//! carrying `isomesh::validate::pinch_census` of the exact buffer that became
+//! the asset. [`PinchReport::is_pinch_free`](isomesh::validate::PinchReport::is_pinch_free)
+//! is the clearance: when it holds, welding this chunk cannot change a component
+//! count. The census is taken on the task pool inside the same extraction, so it
+//! costs the main thread nothing and there is no switch to forget — one path.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -59,6 +75,7 @@ use bevy_tasks::{AsyncComputeTaskPool, Task, block_on, futures_lite::future};
 use tracing::error;
 
 use isomesh::chunk::{ChunkId, ChunkLayout};
+use isomesh::validate::{PinchReport, ValidateConfig, pinch_census};
 use isomesh::{RuntimeShape3, Sdf};
 
 use crate::MeshBuilder;
@@ -238,13 +255,28 @@ pub struct NeedsRemesh;
 #[derive(Component, Clone, Debug)]
 pub struct ChunkMesh(pub Handle<Mesh>);
 
+/// The weld clearance of the buffer [`ChunkMesh`] was built from.
+///
+/// `isomesh::validate::pinch_census` of the chunk's own unwelded vertices,
+/// inserted in the same command as its [`ChunkMesh`] so a consumer never reads a
+/// clearance one frame out of step with the mesh it describes.
+///
+/// Read [`PinchReport::is_pinch_free`](isomesh::validate::PinchReport::is_pinch_free):
+/// when it holds, a weld at this cell size merges only vertices that already
+/// share triangles and cannot change a component count. When it does not,
+/// `pieces_joined` is an **upper bound** on the pieces the weld would fuse — it
+/// is summed per group, so two groups joining one pair of pieces count twice.
+/// It is a clearance, never a tally of welds performed.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct ChunkPinch(pub PinchReport);
+
 /// An extraction in flight on the task pool.
 ///
 /// Carries a `Result` rather than a bare builder: a failed extraction crosses
 /// back to the main thread as a value, where it can be reported against the
 /// chunk that produced it, instead of being absorbed on the worker.
 #[derive(Component)]
-struct MeshingTask(Task<isomesh::Result<MeshBuilder>>);
+struct MeshingTask(Task<isomesh::Result<(MeshBuilder, PinchReport)>>);
 
 /// How much main-thread time per frame the plugin may spend turning finished
 /// extractions into assets.
@@ -401,14 +433,18 @@ fn apply_finished_meshes(
             continue;
         };
         match result {
-            Ok(builder) => {
+            Ok((builder, pinch)) => {
                 // `try_insert`, not `insert`: the consumer may have queued
                 // this chunk's despawn in the same frame -- see the comment at
                 // the MeshingTask insert. The dropped Handle frees the asset.
-                commands
-                    .entity(entity)
-                    .remove::<MeshingTask>()
-                    .try_insert(ChunkMesh(meshes.add(builder.into_mesh())));
+                //
+                // Both components in one call: a `ChunkMesh` whose `ChunkPinch`
+                // lands a command later is a clearance that describes a mesh the
+                // consumer has already welded.
+                commands.entity(entity).remove::<MeshingTask>().try_insert((
+                    ChunkMesh(meshes.add(builder.into_mesh())),
+                    ChunkPinch(pinch),
+                ));
                 stats.applied += 1;
             }
             Err(e) => {
@@ -445,13 +481,20 @@ fn extract_chunk(
     layout: &ChunkLayout<f32>,
     id: ChunkId,
     extractor: Extractor,
-) -> isomesh::Result<MeshBuilder> {
+) -> isomesh::Result<(MeshBuilder, PinchReport)> {
     let mut out = MeshBuilder::new();
     let shape = layout.sample_shape()?;
     let origin = layout.sample_origin(id);
     let cell = layout.cell_size();
     extract_with(extractor, field, &shape, origin, cell, &mut out)?;
-    Ok(out)
+    // The census rides along rather than being a second pass: it reads exactly
+    // the slices about to become the asset, on this worker thread, inside the
+    // work `MeshBudget` already bounds. `?` rather than a substituted default --
+    // `ValidateConfig` has no `Default` by design, and a cell size the layout
+    // rejects is the same loud failure as a rejected extraction.
+    let cfg = ValidateConfig::from_cell_size(f64::from(cell))?;
+    let pinch = pinch_census(out.positions(), out.indices(), &cfg);
+    Ok((out, pinch))
 }
 
 fn extract_with(

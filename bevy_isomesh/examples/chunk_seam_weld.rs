@@ -41,6 +41,19 @@
 //! order, lowest index wins — stated on `isomesh::weld` because epsilon-closeness
 //! is not transitive and "weld everything within ε" does not define equivalence
 //! classes.
+//!
+//! # The clearance line: the prediction beside the outcome
+//!
+//! `isomesh::validate::pinch_census` answers *"is it safe to weld this"* on the
+//! **unwelded** buffer, so this example takes it before the weld and shows it in
+//! both states. It reports the collapse groups a weld at this epsilon would
+//! perform and, of those, how many join pieces the two chunks kept apart — a
+//! seam weld is meant to be all fold and no pinch, and a non-zero pinch count
+//! here would mean the join is fusing surface that was genuinely separate.
+//!
+//! Read it against the `WELDED` line: `pieces_joined` is an **upper bound**, so
+//! `collapse_groups` bounds `vertices_removed()` from above and the two numbers
+//! are a prediction and its outcome on the same frame. Press `V` to see both.
 
 mod common;
 
@@ -52,7 +65,7 @@ use common::{CommonPlugin, DemoMesh, DemoStats, OrbitCamera, ViewFlags};
 use isomesh::chunk::{ChunkId, ChunkLayout};
 use isomesh::fields::Torus;
 use isomesh::marching_cubes::MarchingCubes;
-use isomesh::validate::{ValidateConfig, validate_features};
+use isomesh::validate::{ValidateConfig, pinch_census, validate_features};
 use isomesh::weld::Welder;
 use isomesh::{MeshBuffer, MeshSink, Sdf};
 
@@ -245,6 +258,17 @@ fn remesh(
         .expect("the meshes fit the u32 index space");
     let before = joined.vertex_count();
 
+    // The clearance is a question about the *unwelded* buffer, so the config
+    // moves above the weld and the census is taken here. `pinch_census` says
+    // what a weld at this epsilon would collapse and, of those collapses, how
+    // many join pieces the two independently meshed chunks kept apart -- which
+    // is the decision a caller has to make before it welds anything, and the
+    // one thing `Welder` cannot report because by then it has already welded.
+    let Ok(cfg) = ValidateConfig::from_cell_size(f64::from(h)) else {
+        return;
+    };
+    let clearance = pinch_census(&joined.positions, &joined.indices, &cfg);
+
     let welded = if demo.welded {
         Welder::<f32>::new()
             .weld(&mut joined, isomesh::weld::epsilon_for(h))
@@ -253,9 +277,6 @@ fn remesh(
         None
     };
 
-    let Ok(cfg) = ValidateConfig::from_cell_size(f64::from(h)) else {
-        return;
-    };
     let (report, features) = validate_features(&joined.positions, &joined.indices, &cfg);
 
     // Split the boundary edges into the seam and the chunks' own outer faces.
@@ -298,6 +319,17 @@ fn remesh(
                 w.triangles_collapsed
             ),
             None => format!("UNWELDED {before} verts        [V] to weld"),
+        },
+        if clearance.is_pinch_free() {
+            format!(
+                "clearance: {} collapse groups, 0 pinches - welding this join cannot fuse a piece",
+                clearance.collapse_groups
+            )
+        } else {
+            format!(
+                "clearance: {} collapse groups, {} pinches - welding would fuse up to {} pieces",
+                clearance.collapse_groups, clearance.pinch_groups, clearance.pieces_joined
+            )
         },
         String::new(),
         format!(
@@ -375,5 +407,80 @@ fn draw_seam(overlay: Res<Overlay>, flags: Res<ViewFlags>, mut gizmos: Gizmos<Se
     }
     for [a, b] in &overlay.seam_edges {
         gizmos.line(*a, *b, RED);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The two chunks this demo joins, at the spacing it opens on.
+    fn joined() -> (MeshBuffer<f32>, f32) {
+        let (h, _) = SPACINGS[1];
+        let cells = 28;
+        let width = cells as f32 * h;
+        let layout = ChunkLayout::<f32>::new(cells, h, [-width, -width * 0.5, -width * 0.5])
+            .expect("the demo's layout");
+        let field = Torus::<f32>::canonical();
+        let left_id = ChunkId::new([0, 0, 0]);
+        let (Some(left), Some(right)) = (
+            mesh_chunk(&layout, &field, left_id),
+            mesh_chunk(&layout, &field, left_id.neighbour(0, 1)),
+        ) else {
+            panic!("the torus crosses both chunks");
+        };
+        let mut joined = left;
+        joined.append(&right).expect("two chunks fit u32");
+        (joined, h)
+    }
+
+    /// The clearance predicts the weld, and bounds it from above.
+    ///
+    /// Two independently meshed chunks share a plane of coincident vertices, so
+    /// a **zero** here would mean the census is reading the welded buffer rather
+    /// than the unwelded one — the defect this asserts against, since the HUD
+    /// line would then be a clearance for a mesh that had already been welded.
+    ///
+    /// The bound is the interesting half: `collapse_groups` counts the merges a
+    /// weld *could* perform, so the weld cannot remove more vertices than that.
+    /// Prediction and outcome, on one buffer.
+    #[test]
+    fn the_clearance_predicts_the_weld_and_bounds_it() {
+        let (unwelded, h) = joined();
+        let cfg = ValidateConfig::from_cell_size(f64::from(h)).expect("a positive cell size");
+        let clearance = pinch_census(&unwelded.positions, &unwelded.indices, &cfg);
+
+        assert!(
+            clearance.collapse_groups > 0,
+            "the seam plane carries no coincident vertices, so the census is not \
+             reading the unwelded join"
+        );
+
+        let mut welded = unwelded.clone();
+        let outcome = Welder::<f32>::new()
+            .weld(&mut welded, isomesh::weld::epsilon_for(h))
+            .expect("the weld");
+        assert!(
+            outcome.vertices_removed() as u64 <= clearance.collapse_groups,
+            "the weld removed {} vertices against a predicted ceiling of {} \
+             collapse groups, so the census is not an upper bound",
+            outcome.vertices_removed(),
+            clearance.collapse_groups
+        );
+        assert!(
+            outcome.vertices_removed() > 0,
+            "the weld merged nothing, so the bound above is vacuous"
+        );
+
+        println!(
+            "clearance: {} groups, {} pinches, up to {} pieces, {} folds -> \
+             weld removed {} verts, collapsed {} tris",
+            clearance.collapse_groups,
+            clearance.pinch_groups,
+            clearance.pieces_joined,
+            clearance.sharing_edges,
+            outcome.vertices_removed(),
+            outcome.triangles_collapsed
+        );
     }
 }

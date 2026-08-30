@@ -158,7 +158,7 @@ fn spawning_the_work_does_not_do_the_work() {
         spin: SPIN,
     };
     let one = Instant::now();
-    let built = extract_chunk(
+    let (built, _pinch) = extract_chunk(
         &field,
         &layout,
         ChunkId::new([0, 0, 0]),
@@ -343,6 +343,58 @@ fn the_subgrid_extractor_is_reachable_through_the_component() {
     assert_eq!(meshed(&mut app), 1);
 }
 
+/// The clearance arrives with the mesh, and censuses that same buffer.
+///
+/// A `ChunkPinch` is only usable if it is on **every** entity a consumer can
+/// read a `ChunkMesh` from and if it describes *that* mesh: a report a command
+/// late, or one taken over some other buffer, reads as a clearance for geometry
+/// it never saw, which is worse than absent. The vertex and triangle counts are
+/// what tie the report to the published asset — `into_mesh` does not weld, so
+/// they must agree exactly.
+#[test]
+fn every_meshed_chunk_carries_the_clearance_of_its_own_buffer() {
+    let mut app = app(0, 4);
+    drain_until(&mut app, |app| meshed(app) == 4);
+    assert_eq!(meshed(&mut app), 4, "not every chunk published a mesh");
+
+    let orphans = app
+        .world_mut()
+        .query_filtered::<&ChunkMesh, Without<ChunkPinch>>()
+        .iter(app.world())
+        .count();
+    assert_eq!(orphans, 0, "a chunk published a mesh with no clearance");
+
+    let published: Vec<(Handle<Mesh>, PinchReport)> = app
+        .world_mut()
+        .query::<(&ChunkMesh, &ChunkPinch)>()
+        .iter(app.world())
+        .map(|(mesh, pinch)| (mesh.0.clone(), pinch.0))
+        .collect();
+
+    let meshes = app.world().resource::<Assets<Mesh>>();
+    let mut with_geometry = 0;
+    for (handle, pinch) in &published {
+        let mesh = meshes.get(handle).expect("the published mesh asset");
+        let vertices = mesh.count_vertices() as u64;
+        let triangles = mesh.indices().map_or(0, bevy_mesh::Indices::len) as u64 / 3;
+        assert_eq!(
+            (pinch.vertices, pinch.triangles),
+            (vertices, triangles),
+            "the clearance censused a different buffer than the one published"
+        );
+        if triangles > 0 {
+            with_geometry += 1;
+        }
+    }
+
+    // A census over four empty buffers would satisfy every equality above, so
+    // the population is asserted non-empty rather than assumed.
+    assert!(
+        with_geometry > 0,
+        "no chunk produced geometry, so nothing above was censused"
+    );
+}
+
 /// Two adjacent chunks, meshed independently, welded, counting boundary edges
 /// that lie in their shared plane.
 ///
@@ -355,7 +407,7 @@ fn seam_open_edges<S: VolumeField>(field: &S, extractor: Extractor) -> usize {
     let layout = ChunkLayout::new(16, 0.25, [0.0; 3]).expect("a valid layout");
     let mut all = isomesh::MeshBuffer::<f32>::new();
     for id in [ChunkId::new([0, 0, 0]), ChunkId::new([1, 0, 0])] {
-        let built =
+        let (built, _pinch) =
             extract_chunk(field, &layout, id, extractor).expect("a chunk extraction failed");
         let mut buf = isomesh::MeshBuffer::<f32>::new();
         buf.positions.extend_from_slice(built.positions());

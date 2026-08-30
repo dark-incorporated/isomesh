@@ -127,6 +127,24 @@ CLIPS=(
     "the-tape-you-keep-is-twenty-times-too-big|game_edit_tape_trim|ISOMESH_CAPTURE_FRAMES=150 ISOMESH_CAPTURE_EVERY=2 FPS=10"
     "mirrored-is-not-the-same-mesh|game_mirror_dedup|ISOMESH_CAPTURE_FRAMES=80 ISOMESH_CAPTURE_EVERY=2"
     "where-the-root-falls-decides-the-gain|shifted_linear_root|ISOMESH_CAPTURE_FRAMES=80 ISOMESH_CAPTURE_EVERY=2"
+
+    # -- Phase 26 -------------------------------------------------------------
+    # Two clips whose content is a count, so both keep the HUD.
+    #
+    # `pinch_repair` was missing from this array entirely while
+    # `docs/gifs/pinch-repair-welds-520-components.gif` was committed and
+    # referenced from `bevy_isomesh/DEMOS.md` and `docs/demos/correctness.md` --
+    # its recipe lived only in the example's own module docs, so the one command
+    # that is supposed to rebuild every committed GIF could not rebuild that one.
+    # 1024x576 rather than the default 1280x720 is measured, not a preference:
+    # `record_gif.sh` scales to 900px wide, so 1280 shrinks the 13px HUD to ~9px
+    # and this clip's whole argument is the topology table in the corner.
+    "pinch-repair-welds-520-components|pinch_repair|ISOMESH_WINDOW=1024x576 ISOMESH_SPIN=0.003 ISOMESH_CAPTURE_FRAMES=60 ISOMESH_CAPTURE_EVERY=2 FPS=10"
+    # The same dig as `digging-a-tunnel` above, minus `nohud`: the point of this
+    # one is the `weld clearance:` line moving as the tunnel separates rock, and
+    # a count keeps its HUD. The autocarve rate has to outlast
+    # `SETTLE + FRAMES x EVERY` or the digging finishes before frame zero.
+    "digging-a-weld-clearance|game_dig|ISOMESH_AUTOCARVE=16 ISOMESH_AUTOCARVE_EVERY=3 ISOMESH_CAPTURE_FRAMES=60 ISOMESH_CAPTURE_EVERY=2 FPS=10"
 )
 
 # The filters are this script's own arguments, captured once. `want` used to

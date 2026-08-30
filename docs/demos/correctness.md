@@ -104,7 +104,8 @@ perfectly — both volumes go to **zero** degenerate triangles — and `max_snap
 so **no geometry moves at all**. It is a pure connectivity decision.
 
 **And that is exactly why it is dangerous.** On `bonsai` it changes χ from 517 to 585, creates 561
-non-manifold edges, and **welds 520 previously separate components**. On `fuel` nothing moves. The
+non-manifold edges, and **fuses up to 520 previously separate components** — an upper bound, because the
+figure is summed per group; the components actually merged are 129. On `fuel` nothing moves. The
 difference is decidable *before* the repair, by one union-find over the baseline mesh: two vertices
 snapping to the same corner that **already share a triangle** are a fold, and safe; two that share **no**
 triangle are different sheets, and identifying them is a topology change.
@@ -112,6 +113,13 @@ triangle are different sheets, and identifying them is a topology change.
 **So the shippable result is the precondition, not the repair** — and a crate that shipped the repair
 unconditionally would silently weld a CT scan and pass every gate except the Euler characteristic
 (M-352).
+
+That precondition now **ships**, as `isomesh::validate::pinch_census`. The union-find is the crate's, the
+516 and the 520 on this demo's HUD are `PinchReport::pinch_groups` and `pieces_joined` read off the
+baseline buffer before the label touches it, and the example cross-checks them column by column against
+`docs/experiments/p-53.csv`. Two other demos consume it: `chunk_seam_weld` takes the clearance of the
+unwelded join and shows it beside what `Welder` then actually did, and `game_dig` measures what welding
+its 64 unwelded chunks together would cost (`[P]`).
 
 ```bash
 cd bevy_isomesh && cargo run --example pinch_repair --release

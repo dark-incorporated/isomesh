@@ -122,6 +122,16 @@
      coloured headline naming the mesher — a different colour for each of the
      eight, in key order — and one line of keys under it. <kbd>H</kbd> brings the
      numbers back.</p>
+  <p><kbd>P</kbd> adds one more line to that panel: <strong>what welding this
+     world would cost</strong>. Every chunk here is drawn unwelded — that is the
+     design, and it is why the cell size is a power of two — so the seam vertices
+     are computed twice and kept twice. Anything that wants one buffer instead, a
+     collider or an export, has to weld, and
+     <code>isomesh::validate::pinch_census</code> says in advance what that would
+     join: <strong>2,057 coincidence groups</strong> across the 64 meshed chunks,
+     every one of them a seam rather than a fold, fusing up to 2,155 pieces. It
+     is off by default because measuring it takes about 15 ms, more than three
+     frame budgets, and the line prints its own cost beside the answer.</p>
   <p><strong>Hold the left button to carve</strong>, the right to fill. The
      translucent sphere on the rock under the crosshair is the brush that a click
      would push — orange to carve, cyan to fill — so what you see is what you

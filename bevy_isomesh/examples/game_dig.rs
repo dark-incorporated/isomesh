@@ -63,6 +63,37 @@
 //! so it uses the spacing where the seam is exact and the surface is continuous
 //! without one. `chunk_seam_weld` is the example that shows the other case.
 //!
+//! # `[P]` — what the weld it declines would cost
+//!
+//! Not welding is a decision, and a decision has a price. Every chunk is handed
+//! to the renderer with its seam vertices computed twice and kept twice, so
+//! anything downstream that *does* want one buffer — a collider baker, an
+//! exporter — has to weld, and welding can fuse surface the chunks kept apart.
+//!
+//! `isomesh::validate::pinch_census` answers that before anyone welds anything.
+//! `[P]` (or `ISOMESH_PINCH`) turns it on, and the numbers panel (`H`) then
+//! carries a `weld clearance:` line: the coincidence groups a weld would
+//! collapse, how many of those would join separate pieces, an upper bound on the
+//! pieces, and what the census cost.
+//!
+//! **It censuses the joined resident world, not one chunk, and that is measured
+//! rather than chosen.** A per-chunk census of this demo reads **0 collapse
+//! groups over all 64 non-empty chunks** on bare terrain and **2** over the
+//! whole sandbox after a 40-brush tunnel: Marching Cubes caches one vertex per
+//! grid *edge*, so a chunk holds no coincident pair unless a sample lands
+//! exactly on the isovalue, which a continuous SDF essentially never does. The
+//! coincidences are **between** chunks and exist only once the chunks are in one
+//! buffer — the joined world reads **2,057 groups, 2,057 pinches, up to 2,155
+//! pieces**, with `sharing_edges` **0**, which is itself the proof that every
+//! pair is a seam duplicate rather than a fold.
+//!
+//! **It is behind a key because it costs 14.4 ms** on those 24,244 vertices
+//! (best of twelve, release, 5900X): `pinch_features` probes 27 lattice cells
+//! per vertex by binary search, which is linear with a large constant and three
+//! and a half times the whole `MESH_BUDGET`. So it recomputes only when it is
+//! wanted, the resident geometry has changed, and the drain has finished — and
+//! it prints its own cost beside the answer rather than hiding it.
+//!
 //! # The edit log grows, and the cost grows with it — sub-linearly
 //!
 //! Edits compose rather than mutate: the field is a `BrushStack` over the base
@@ -98,7 +129,7 @@ use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseSc
 use bevy::pbr::{ExtendedMaterial, MaterialExtension, MaterialPlugin};
 use bevy::platform::time::Instant;
 use bevy::prelude::*;
-use bevy::render::mesh::{Indices, PrimitiveTopology};
+use bevy::render::mesh::{Indices, PrimitiveTopology, VertexAttributeValues};
 use bevy::render::render_resource::AsBindGroup;
 use bevy::render::renderer::{RenderDevice, RenderQueue};
 use bevy::shader::{Shader, ShaderRef};
@@ -115,6 +146,7 @@ use isomesh::manifold_dual_contouring::ManifoldDualContouring;
 use isomesh::marching_cubes::{FaceAmbiguity, MarchingCubes};
 use isomesh::marching_tetrahedra::MarchingTetrahedra;
 use isomesh::surface_nets::SurfaceNets;
+use isomesh::validate::{ValidateConfig, pinch_census};
 use isomesh::{Real, RuntimeShape3, Sdf};
 use isomesh_gpu::{
     ExtractTimings, FieldBuffer, FieldSampler, GpuBrush, GpuOp, GpuShape, GridParams,
@@ -146,6 +178,14 @@ const EXTENT: [i32; 3] = [8, 4, 8];
 /// carve -- outside `sandbox` -- which is why the walls can never be dug
 /// through.
 const WALL_THICKNESS: f32 = 0.5;
+
+/// Frames between the resident geometry changing and the weld clearance being
+/// re-censused.
+///
+/// Two, not one: `reconcile` publishes `Mesh3d` through `Commands`, so the frame
+/// that changes geometry is the frame before `weld_clearance`'s query can see
+/// it. One would census a world missing the chunk that triggered the census.
+const CLEARANCE_SETTLE: u8 = 2;
 
 /// Gizmos for the re-meshed-chunk outline.
 #[derive(Default, Reflect, GizmoConfigGroup)]
@@ -427,6 +467,92 @@ struct World {
     /// Readbacks the device refused. Zero is the only acceptable value; it is on
     /// the HUD so a non-zero one cannot hide.
     gpu_failures: u32,
+    /// `[P]`: whether the weld clearance is being measured. Off by default and
+    /// set by `ISOMESH_PINCH`, because the census costs far more than a frame --
+    /// see [`WeldClearance`].
+    pinch_enabled: bool,
+    /// Frames to wait before re-censusing, or `0` when the reading is current.
+    ///
+    /// A countdown rather than a `stale` flag, and the difference is a defect
+    /// this had: `reconcile` publishes through `Commands`, so the frame that
+    /// finishes a drain is the frame *before* the last chunk's `Mesh3d` exists.
+    /// A census fired on that frame reads a world one chunk short and then marks
+    /// itself current, so the wrong number sticks. Set to `2` on every publish
+    /// and decremented once the backlog is clear, the census runs a frame later
+    /// and sees every chunk.
+    clearance_settle: u8,
+    /// The last weld clearance measured over the whole resident world, or `None`
+    /// when none has been.
+    clearance: Option<WeldClearance>,
+}
+
+/// What welding the whole resident world would cost.
+///
+/// Every chunk ships **unwelded** -- that is this demo's design, and the module
+/// docs say why -- so this is not a report on anything that happened. It is the
+/// price of a weld the demo declines, which is the bill an engine baking one
+/// collider, or exporting one mesh, actually receives.
+///
+/// # Why the whole world and not one chunk
+///
+/// Measured, because the obvious choice is the wrong one. A **per-chunk** census
+/// of this demo reads **zero collapse groups over all 64 non-empty chunks** on
+/// bare terrain, and 2 over the whole sandbox after a 40-brush tunnel: Marching
+/// Cubes caches one vertex per grid *edge*, so a chunk holds no coincident pair
+/// unless a sample lands exactly on the isovalue, which a continuous SDF
+/// essentially never does. A HUD line that can only ever say `0` is not a
+/// measurement (`M-44`).
+///
+/// The coincidences are **between** chunks, and they only exist once the chunks
+/// are in one buffer: the joined resident world reads **2,057 collapse groups,
+/// 2,057 pinches, up to 2,155 pieces** on bare terrain, and `sharing_edges` is
+/// **0** -- which is the proof that every coincident pair is a seam duplicate,
+/// since a pair from one chunk would share a triangle. Driving a tunnel moves it
+/// to 2,073 / 2,071 / 2,169 with `sharing_edges` 4.
+///
+/// # Why it is behind a key
+///
+/// The census is **14.4 ms** over this world's 24,244 vertices, best of twelve
+/// in a release build on a 5900X -- `pinch_features`' epsilon-graph probes 27
+/// lattice cells per vertex by binary search, so it is linear with a large
+/// constant. That is three and a half times the whole [`MESH_BUDGET`] and worse
+/// on wasm, so it is off unless asked for, exactly as `chunk_seam_weld`'s weld
+/// is. `ISOMESH_PINCH` sets the initial state, `[P]` toggles it, and the cost is
+/// on the HUD beside the answer rather than hidden.
+#[derive(Clone, Copy)]
+struct WeldClearance {
+    /// Resident chunks joined into the censused buffer.
+    chunks: u32,
+    /// Vertices in it, which is what the cost below is per.
+    vertices: u64,
+    /// `PinchReport::collapse_groups`: the merges a weld would perform.
+    collapse_groups: u64,
+    /// Of those, the ones that join surface the chunks kept apart.
+    pinch_groups: u64,
+    /// An **upper bound** on the pieces the weld would fuse: summed per group,
+    /// so two groups joining one pair of pieces count twice.
+    pieces_joined: u64,
+    /// Coincident pairs that already share a triangle. Zero means every pair is
+    /// a chunk seam, which is the reading this demo expects.
+    sharing_edges: u64,
+    /// What the census cost, measured rather than described.
+    census_ms: f64,
+}
+
+impl WeldClearance {
+    /// The HUD line.
+    fn line(&self) -> String {
+        format!(
+            "weld clearance: {} groups over {} chunks / {} verts, {} pinches - welding would fuse up to {} pieces  ({:.1} ms, {} folds)",
+            self.collapse_groups,
+            self.chunks,
+            self.vertices,
+            self.pinch_groups,
+            self.pieces_joined,
+            self.census_ms,
+            self.sharing_edges,
+        )
+    }
 }
 
 #[derive(Component)]
@@ -724,6 +850,11 @@ fn main() {
         // really in flight, which is the difference between deferring a chunk and
         // deferring every chunk. A job dispatched this frame is still collected
         // next frame at the earliest, so nothing about the latency changes.
+        //
+        // `weld_clearance` sits after the drain and reads `Mesh3d` handles that
+        // `reconcile` queued through `Commands`, so it is always one frame
+        // behind the newest chunk -- which is why it is gated on an empty
+        // backlog rather than on a single drain.
         (
             touch_input,
             grab,
@@ -733,6 +864,7 @@ fn main() {
             dig,
             gpu_collect,
             drain_dirty,
+            weld_clearance,
             ghost,
             report,
             outline_chunks,
@@ -1079,6 +1211,14 @@ fn setup(
         gpu_cost: None,
         gpu_peak_triangles: 0,
         gpu_failures: 0,
+        // `ISOMESH_PINCH` sets the initial state so a recording can show the
+        // clearance without a keypress -- the same contract `ISOMESH_WELD` has
+        // in `chunk_seam_weld`, and the reason `active_cells.rs:801` gives for
+        // it: a view reachable only by pressing a key is a view no committed
+        // image can be regenerated from.
+        pinch_enabled: std::env::var("ISOMESH_PINCH").is_ok(),
+        clearance_settle: CLEARANCE_SETTLE,
+        clearance: None,
     };
 
     // Mark every chunk once. `drain_dirty` meshes them under its frame budget,
@@ -1806,6 +1946,14 @@ fn drain_dirty(
     );
     // Asset creation is deliberately outside the timed region: the budget bounds
     // *extraction*, and charging it for `Assets::add` would measure Bevy.
+    //
+    // An empty `built` means this frame went entirely to the GPU queue or to
+    // deferrals, so the resident geometry is unchanged and the clearance is
+    // still current. A `None` entry is a change too -- the chunk had a mesh and
+    // now has none.
+    if !built.is_empty() {
+        world.clearance_settle = CLEARANCE_SETTLE;
+    }
     for (id, mesh) in built {
         reconcile(
             &mut commands,
@@ -2028,6 +2176,10 @@ fn gpu_collect(
             continue;
         };
         world.gpu_peak_triangles = world.gpu_peak_triangles.max(total);
+        // The device published geometry, so the clearance no longer describes
+        // the resident world. Marked here as well as in `drain_dirty` because
+        // key 8's chunks never pass through it.
+        world.clearance_settle = CLEARANCE_SETTLE;
         reconcile(
             &mut commands,
             &chunks,
@@ -2036,6 +2188,87 @@ fn gpu_collect(
             mesh.map(|m| meshes.add(m)),
         );
     }
+}
+
+/// Census what welding the whole resident world would cost, when asked and when
+/// out of date.
+///
+/// Three guards, and each removes a way this could be dishonest or expensive:
+///
+/// - **`pinch_enabled`.** The census is 14.4 ms on this world (see
+///   [`WeldClearance`]) against a 4 ms [`MESH_BUDGET`], so it is off unless
+///   `ISOMESH_PINCH` or `[P]` asks. Not a fallback: the reading is either
+///   measured or absent, never estimated.
+/// - **`clearance_settle`.** Recomputed only when a drain or a readback has
+///   changed the resident geometry, so holding the mouse button costs one census
+///   per settled state rather than one per frame — and one frame *after* the
+///   change, so `reconcile`'s commands have flushed.
+/// - **`backlog == 0`.** A world mid-drain is missing chunks, and a census of it
+///   would report a seam count for a world nobody is looking at. The countdown
+///   is held, not spent, until the drain finishes, so a long drain delays the
+///   reading rather than producing a wrong one.
+///
+/// Runs after `gpu_collect` and `drain_dirty`, so the handles those queued
+/// through `Commands` have been flushed by a previous frame and the query sees
+/// the world that is actually on screen.
+fn weld_clearance(
+    mut world: ResMut<World>,
+    meshes: Res<Assets<Mesh>>,
+    handles: Query<&Mesh3d, With<Chunk>>,
+) {
+    if !world.pinch_enabled || world.clearance_settle == 0 {
+        return;
+    }
+    // Held rather than spent: a mid-drain world is not the world to census.
+    if world.backlog > 0 {
+        return;
+    }
+    world.clearance_settle -= 1;
+    if world.clearance_settle > 0 {
+        return;
+    }
+    let Ok(cfg) = ValidateConfig::from_cell_size(f64::from(CELL_SIZE)) else {
+        return;
+    };
+
+    // One buffer, because the coincidences this asks about exist *between*
+    // chunks and a per-chunk census cannot see them -- the measurement is in
+    // [`WeldClearance`]'s docs. Indices are shifted by the running vertex count,
+    // which is what `MeshBuffer::append` does and what an exporter would do.
+    let mut positions: Vec<[f32; 3]> = Vec::new();
+    let mut indices: Vec<u32> = Vec::new();
+    let mut resident = 0u32;
+    for handle in &handles {
+        let Some(mesh) = meshes.get(&handle.0) else {
+            continue;
+        };
+        let Some(VertexAttributeValues::Float32x3(p)) = mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+        else {
+            continue;
+        };
+        let base = u32::try_from(positions.len()).expect("the sandbox fits u32");
+        positions.extend_from_slice(p);
+        match mesh.indices() {
+            Some(Indices::U32(v)) => indices.extend(v.iter().map(|i| i + base)),
+            // The GPU path writes a soup with no index buffer, so the identity
+            // is the index buffer -- the same thing `gpu_mesh` builds.
+            Some(Indices::U16(v)) => indices.extend(v.iter().map(|i| u32::from(*i) + base)),
+            None => indices.extend(base..base + u32::try_from(p.len()).expect("a chunk")),
+        }
+        resident += 1;
+    }
+
+    let started = Instant::now();
+    let pinch = pinch_census(&positions, &indices, &cfg);
+    world.clearance = Some(WeldClearance {
+        chunks: resident,
+        vertices: pinch.vertices,
+        collapse_groups: pinch.collapse_groups,
+        pinch_groups: pinch.pinch_groups,
+        pieces_joined: pinch.pieces_joined,
+        sharing_edges: pinch.sharing_edges,
+        census_ms: started.elapsed().as_secs_f64() * 1e3,
+    });
 }
 
 /// Turn one finished readback into its triangle count and a `Mesh`, or `None`
@@ -2583,6 +2816,13 @@ fn dig(
     if keys.just_pressed(KeyCode::KeyC) {
         world.show_chunks = !world.show_chunks;
     }
+    if keys.just_pressed(KeyCode::KeyP) {
+        world.pinch_enabled = !world.pinch_enabled;
+        // Turning it on has to make it recompute: the resident world may not
+        // have changed since the last drain, and a reading of `None` with the
+        // switch on would look like a broken key rather than a pending census.
+        world.clearance_settle = CLEARANCE_SETTLE;
+    }
 
     // **One carve per *captured* frame, not per rendered frame.** The tunnel
     // bores away from the camera at 0.34 units a step, so at 60 Hz it is out of
@@ -2912,6 +3152,11 @@ fn report(
             ),
             None => String::new(),
         },
+        match world.clearance {
+            Some(c) => c.line(),
+            None if world.pinch_enabled => "weld clearance: measuring...  [P] to stop".to_string(),
+            None => "weld clearance: [P] to measure what welding this world would cost".to_string(),
+        },
         String::new(),
         format!(
             "mesher     last switch {} chunks in {:.0} ms across frames   \
@@ -3012,7 +3257,7 @@ fn report(
     // the panel it is printed on must be findable on that panel.
     stats.keys = Some(
         "[LMB] hold to carve   [RMB] hold to fill   [WASD] move   [Space] jump   [F] walk/fly   [Shift] fast\n\
-         [wheel] or [ ] brush   [1-8] mesher   [Z] undo   [X] clear log   [C] chunks   [H] HUD   [Tab] cursor   [F12] shot"
+         [wheel] or [ ] brush   [1-8] mesher   [Z] undo   [X] clear log   [C] chunks   [P] weld clearance   [H] HUD   [Tab] cursor   [F12] shot"
             .to_string(),
     );
 }
@@ -3157,6 +3402,9 @@ mod tests {
             gpu_cost: None,
             gpu_peak_triangles: 0,
             gpu_failures: 0,
+            pinch_enabled: false,
+            clearance_settle: CLEARANCE_SETTLE,
+            clearance: None,
         };
         world.switch_chunks = mark_sandbox(&mut world.dirty);
 
@@ -3194,6 +3442,7 @@ mod tests {
                     // has to be checked against what is really in flight.
                     gpu_collect,
                     drain_dirty,
+                    weld_clearance,
                     loading_modal,
                 )
                     .chain(),
@@ -3579,6 +3828,123 @@ mod tests {
         assert!(
             verdict.contains(&format!("{} KB", 256 * 4913 * 4 / 1024)),
             "the uploaded-sample total is not the 256-chunk figure: {verdict}"
+        );
+    }
+
+    /// The clearance is measured over the join, and the join is why.
+    ///
+    /// CI type-checks this example and never links it, so this is the only
+    /// automated thing standing between the `weld clearance:` line and silent
+    /// removal. It asserts four things, and the fourth is the reason the code is
+    /// shaped the way it is:
+    ///
+    /// 1. `[P]` produces a reading over the whole resident world.
+    /// 2. That reading is **non-zero** — the seam duplicates are really there.
+    /// 3. `sharing_edges` is **0**, so every coincident pair is a chunk seam
+    ///    rather than a fold. That is the claim [`WeldClearance`]'s docs make.
+    /// 4. **The per-chunk census of the same world reads zero.** This is the
+    ///    negative control, and without it clause 2 proves nothing about the
+    ///    buffer: it would pass just as well if a per-chunk census had found
+    ///    those groups. It did not, and cannot — Marching Cubes caches one
+    ///    vertex per grid edge — so anyone tempted to simplify this back to a
+    ///    per-chunk census fails here with the measurement that forbids it.
+    #[test]
+    fn the_weld_clearance_is_measured_over_the_join_because_a_chunk_reads_zero() {
+        let mut app = harness(false);
+        app.init_resource::<DemoStats>();
+        app.world_mut().resource_mut::<World>().pinch_enabled = true;
+        // The startup fill is a CPU drain over the whole sandbox on key 1.
+        drain(&mut app);
+        // `CLEARANCE_SETTLE` frames for `reconcile`'s commands to flush and the
+        // census to run on a world that holds every chunk.
+        for _ in 0..=CLEARANCE_SETTLE {
+            step(&mut app);
+        }
+        app.world_mut()
+            .run_system_once(report)
+            .expect("the HUD system");
+
+        let lines = app.world().resource::<DemoStats>().extra.clone();
+        let line = lines
+            .iter()
+            .find(|l| l.starts_with("weld clearance:"))
+            .expect("the weld clearance line")
+            .clone();
+        println!("{line}");
+
+        let clearance = app
+            .world()
+            .resource::<World>()
+            .clearance
+            .expect("the census ran");
+        assert!(
+            clearance.chunks > 0 && clearance.vertices > 0,
+            "the censused buffer was empty, so nothing below is a measurement"
+        );
+        assert!(
+            clearance.collapse_groups > 0 && clearance.pinch_groups > 0,
+            "the joined world reported no coincidences, so the seams are not \
+             duplicated and this demo's premise is wrong: {} groups, {} pinches \
+             over {} verts",
+            clearance.collapse_groups,
+            clearance.pinch_groups,
+            clearance.vertices
+        );
+        assert_eq!(
+            clearance.sharing_edges, 0,
+            "a coincident pair already shared a triangle, so not every pair is a \
+             chunk seam and the HUD's reading means something else"
+        );
+        assert!(
+            line.contains(&clearance.collapse_groups.to_string())
+                && line.contains(&clearance.pieces_joined.to_string()),
+            "the HUD line does not carry the numbers that were measured: {line}"
+        );
+
+        // The negative control. Same world, same config, censused per chunk.
+        let layout = test_layout();
+        let cfg = ValidateConfig::from_cell_size(f64::from(CELL_SIZE)).expect("the demo's cell");
+        let empty: Vec<Brush<Sphere<f32>>> = Vec::new();
+        let field = BrushStack {
+            base: Ground,
+            brushes: &empty,
+        };
+        let mut per_chunk_groups = 0u64;
+        let mut per_chunk_meshed = 0u32;
+        for z in 0..EXTENT[2] {
+            for y in 0..EXTENT[1] {
+                for x in 0..EXTENT[0] {
+                    let origin = layout.sample_origin(ChunkId::new([x, y, z]));
+                    let Some(mesh) = Algorithm::MarchingCubes.mesh(&layout, &field, origin) else {
+                        continue;
+                    };
+                    let Some(VertexAttributeValues::Float32x3(p)) =
+                        mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+                    else {
+                        panic!("a meshed chunk with no positions");
+                    };
+                    let Some(Indices::U32(i)) = mesh.indices() else {
+                        panic!("a meshed chunk with no u32 indices");
+                    };
+                    per_chunk_meshed += 1;
+                    per_chunk_groups += pinch_census(p, i, &cfg).collapse_groups;
+                }
+            }
+        }
+        assert!(
+            per_chunk_meshed > 0,
+            "no chunk meshed, so the control is vacuous"
+        );
+        assert_eq!(
+            per_chunk_groups, 0,
+            "a per-chunk census found {per_chunk_groups} groups over \
+             {per_chunk_meshed} chunks -- if that is now non-zero the reason this \
+             censuses the join has changed and the docs must be re-measured"
+        );
+        println!(
+            "control: {per_chunk_meshed} chunks censused individually -> \
+             {per_chunk_groups} collapse groups; joined -> {} over {} verts in {:.1} ms",
+            clearance.collapse_groups, clearance.vertices, clearance.census_ms
         );
     }
 

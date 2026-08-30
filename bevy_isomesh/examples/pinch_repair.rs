@@ -27,8 +27,13 @@
 //! # whole argument is the numbers in the corner, so the HUD sets the
 //! # capture size rather than the other way round.
 //! ISOMESH_WINDOW=1024x576 ISOMESH_SPIN=0.003 \
-//!   ./scripts/record_gif.sh pinch_repair docs/gifs/e310.gif
+//!   ./scripts/record_gif.sh pinch_repair \
+//!   docs/gifs/pinch-repair-welds-520-components.gif
 //! ```
+//!
+//! That stem is the committed one, and `scripts/record_all_gifs.sh` carries the
+//! same row, so re-recording overwrites the referenced file rather than writing
+//! a second one beside it.
 //!
 //! Nothing but the camera moves between frames — the meshes are prebuilt and the
 //! arm switch is a handle swap — so a GIF of this compresses well at the
@@ -63,7 +68,7 @@
 //! | boundary edges | 24 → 24 | **4366 → 3716** |
 //! | collapse groups | 50 | 17,201 |
 //! | **pinch groups** | **0** | **516** |
-//! | components welded | 0 | **520** |
+//! | pieces joined (upper bound) | 0 | **520** |
 //!
 //! `max_snap_distance` is exactly zero on both, and that is the load-bearing
 //! number: with `origin = 0`, `h = 1` and integer samples, `t` is exactly 0 or 1
@@ -87,16 +92,28 @@
 //!
 //! `fuel` has **0 pinches of 50 groups**. Every collapse there is a fold, the
 //! three topology counters do not budge, and the repair is free. `bonsai` has
-//! **516 of 17,201**, and those 516 weld **520** previously separate pieces
-//! together: χ moves 517 → 585, 561 non-manifold edges appear where there were
+//! **516 of 17,201**, and those 516 join **at most 520** previously separate
+//! pieces: χ moves 517 → 585, 561 non-manifold edges appear where there were
 //! none, and 650 boundary edges vanish into the welds.
 //!
-//! So the shippable result is the **precondition**, not the repair. A pipeline
-//! that guarantees no sample sits exactly on the isovalue — contour at a
+//! So the shippable result is the **precondition**, not the repair — and it now
+//! ships, as [`isomesh::validate::pinch_census`]. This example is its consumer:
+//! the 516 and the 520 on the HUD are
+//! [`PinchReport::pinch_groups`](isomesh::validate::PinchReport::pinch_groups)
+//! and [`pieces_joined`](isomesh::validate::PinchReport::pieces_joined) read off
+//! the baseline buffer *before* the label touches it, and the repair below is
+//! then applied to a mesh whose cost was already known. A pipeline that
+//! guarantees no sample sits exactly on the isovalue — contour at a
 //! half-integer, which `u8` data cannot attain — gets `fuel`'s row on every
 //! volume. A pipeline that applies the label to data that *does* have equal
 //! corners gets a mesh with no degenerate triangles and a different topology
 //! than the one it extracted.
+//!
+//! **`pieces_joined` is an upper bound, not a count.** It is summed over the
+//! groups in isolation, so two groups joining the same pair of pieces count
+//! twice: `P-125` predicts 520 on `bonsai` where the components actually merged
+//! are 129. The HUD says "welds up to", and χ moving 517 → 585 is the outcome
+//! beside the prediction.
 //!
 //! # What is on screen
 //!
@@ -116,7 +133,9 @@
 //!   the demonstration.
 //!
 //! A degenerate triangle has zero area and draws nothing, so it cannot be shaded;
-//! what is highlighted is the site, from the same exact census the ledger used.
+//! what is highlighted is the site, from the crate's own
+//! [`pinch_features`](isomesh::validate::pinch_features) census — the same one
+//! the ledger's columns were measured with.
 //!
 //! # `f64`, Marching Cubes, and the ledger
 //!
@@ -150,7 +169,7 @@ use common::{Capture, CommonPlugin, DemoDomain, DemoMesh, DemoStats, OrbitCamera
 use isomesh::construct::SampledField;
 use isomesh::marching_cubes::MarchingCubes;
 use isomesh::marching_cubes::table::{self, CASES, EDGE_AXIS, EDGE_CORNERS, is_inside};
-use isomesh::validate::{ValidateConfig, mesh_hash, validate_indexed};
+use isomesh::validate::{ValidateConfig, mesh_hash, pinch_features, validate_indexed};
 use isomesh::{MeshBuffer, MeshSink, RuntimeShape3, Sdf, Shape3};
 
 // ─── the registered fixture ─────────────────────────────────────────────────
@@ -590,41 +609,6 @@ fn mark_degenerate_vertices(mesh: &MeshBuffer<f64>, class: &mut [u8]) -> u64 {
 
 // ─── the collapse ───────────────────────────────────────────────────────────
 
-/// Disjoint-set over vertex indices, path halving, unioned to the **lower**
-/// root.
-///
-/// `validate::Dsu` is private and this needs the same property it has: the
-/// result depends only on which unions were requested, never on the order they
-/// arrived in, so the component count below is a pure function of the mesh.
-struct Dsu(Vec<u32>);
-
-impl Dsu {
-    /// `n` singletons.
-    fn new(n: usize) -> Self {
-        Self((0..n as u32).collect())
-    }
-
-    /// The root of `x`, halving the path on the way.
-    fn find(&mut self, mut x: u32) -> u32 {
-        while self.0[x as usize] != x {
-            let parent = self.0[x as usize];
-            self.0[x as usize] = self.0[parent as usize];
-            x = self.0[x as usize];
-        }
-        x
-    }
-
-    /// Join two sets, keeping the lower root.
-    fn union(&mut self, a: u32, b: u32) {
-        let (ra, rb) = (self.find(a), self.find(b));
-        if ra == rb {
-            return;
-        }
-        let (lo, hi) = if ra < rb { (ra, rb) } else { (rb, ra) };
-        self.0[hi as usize] = lo;
-    }
-}
-
 /// What the ternary label did, and the mesh it produced.
 struct Ternary {
     /// The repaired mesh.
@@ -644,18 +628,20 @@ struct Ternary {
     /// Vertices whose position is bit-identical to an earlier vertex's and which
     /// the `=` label does not reach.
     unexplained_coincident: u64,
-    /// Collapsed groups whose members did **not** all already share triangles.
+    /// Coincidence groups whose members did **not** all already share
+    /// triangles, from [`isomesh::validate::pinch_census`].
     pinch_groups: u64,
-    /// Summed `components − 1` over those groups: how many separate pieces the
-    /// collapse welded together in total.
+    /// `PinchReport::pieces_joined`: summed `clusters − 1` over those groups.
+    ///
+    /// An **upper bound** on the pieces a collapse joins, not a count of them.
     pinch_excess_components: u64,
     /// Per baseline vertex: [`CLASS_PLAIN`], [`CLASS_SAFE`] or [`CLASS_PINCH`].
     class: Vec<u8>,
     /// Per baseline vertex: its index in [`Self::mesh`], or `u32::MAX` when it
     /// was merged into another.
     new_index: Vec<u32>,
-    /// World positions of the corners where the collapse welds pieces that
-    /// shared no triangle.
+    /// World positions where the collapse welds pieces that shared no triangle:
+    /// one per pinch group, taken from its first member.
     pinch_sites: Vec<[f64; 3]>,
 }
 
@@ -682,6 +668,7 @@ fn ternary(
     prov: &Provenance,
     raw: &[u8],
     shape: &RuntimeShape3,
+    cfg: &ValidateConfig,
 ) -> Ternary {
     let size = shape.size();
     let stride = [1, size[0], size[0] * size[1]];
@@ -811,44 +798,29 @@ fn ternary(
     // Two vertices of one group that already share a triangle are two corners of
     // a triangle about to be dropped: the fold flattens and nothing moves. Two
     // that share no triangle are on different pieces of the surface, and
-    // identifying their point is a pinch. This is the difference between the
-    // topology holding and the topology moving, so it is counted rather than
-    // argued.
-    let mut dsu = Dsu::new(n);
-    for tri in base.indices.as_chunks::<3>().0 {
-        for (a, b) in [(0, 1), (1, 2), (2, 0)] {
-            let (u, w) = (tri[a], tri[b]);
-            if u != w && remap[u as usize] == remap[w as usize] {
-                dsu.union(u, w);
-            }
-        }
-    }
+    // identifying their point is a pinch.
+    //
+    // The crate decides it: `validate::pinch_features` groups the coincident
+    // vertices and labels every member with its sharing cluster, so a group
+    // carrying two distinct labels is a pinch. It censuses the **baseline**
+    // buffer rather than the snap targets, which is the same population because
+    // `max_snap` above is exactly zero — the `=` corners this arm snaps to are
+    // where those vertices already are. `P-125` measured that agreement on both
+    // volumes and the ledger check below re-measures it here.
+    let (pinch, groups_crs) = pinch_features(&base.positions, &base.indices, cfg);
     let mut class = vec![CLASS_PLAIN; n];
-    let mut pinch_groups = 0u64;
-    let mut pinch_excess_components = 0u64;
     let mut pinch_sites = Vec::new();
-    let mut g = 0;
-    while g < pairs.len() {
-        let mut j = g + 1;
-        while j < pairs.len() && pairs[j].0 == pairs[g].0 {
-            j += 1;
+    for g in 0..groups_crs.group_count() {
+        let members = groups_crs.members(g);
+        let split = groups_crs.clusters_are_split(g);
+        if split {
+            // Every member is at one point, so the first one *is* the site.
+            pinch_sites.push(base.positions[members[0] as usize]);
         }
-        if j - g > 1 {
-            let mut roots: Vec<u32> = pairs[g..j].iter().map(|&(_, v)| dsu.find(v)).collect();
-            roots.sort_unstable();
-            roots.dedup();
-            let pinch = roots.len() > 1;
-            if pinch {
-                pinch_groups += 1;
-                pinch_excess_components += roots.len() as u64 - 1;
-                pinch_sites.push(corner_position(shape, pairs[g].0));
-            }
-            let paint = if pinch { CLASS_PINCH } else { CLASS_SAFE };
-            for &(_, v) in &pairs[g..j] {
-                class[v as usize] = paint;
-            }
+        let paint = if split { CLASS_PINCH } else { CLASS_SAFE };
+        for &v in members {
+            class[v as usize] = paint;
         }
-        g = j;
     }
 
     Ternary {
@@ -860,8 +832,8 @@ fn ternary(
         triangles_dropped,
         max_snap,
         unexplained_coincident,
-        pinch_groups,
-        pinch_excess_components,
+        pinch_groups: pinch.pinch_groups,
+        pinch_excess_components: pinch.pieces_joined,
         class,
         new_index,
         pinch_sites,
@@ -1006,11 +978,14 @@ struct VolumeData {
     base: Arm,
     /// The repaired arm: the same mesh under the ternary label.
     repaired: Arm,
-    /// Groups with more than one member.
+    /// Snap-target groups with more than one member — the merges the repair
+    /// below actually performs, checked against the census's `collapse_groups`
+    /// through the ledger.
     collapsed_groups: u64,
     /// Of those, how many weld pieces that shared no triangle.
     pinch_groups: u64,
-    /// How many separate pieces those welds joined.
+    /// `PinchReport::pieces_joined` — an **upper bound** on the pieces those
+    /// welds join, since two groups joining one pair of pieces count twice.
     pinch_excess: u64,
     /// The largest move the snap made. Exactly zero, which is the point.
     max_snap: f64,
@@ -1032,7 +1007,7 @@ impl VolumeData {
     /// One line, for the log and the HUD, carrying this volume's headline row.
     fn headline(&self) -> String {
         format!(
-            "{:<6} {} -> {}  chi {} -> {}  {}/{} pinch, {} welded",
+            "{:<6} {} -> {}  chi {} -> {}  {}/{} pinch, up to {} welded",
             self.name,
             self.base.degenerate,
             self.repaired.degenerate,
@@ -1113,7 +1088,7 @@ fn build_volume(dir: &Path, v: &Volume, ledger: &Ledger) -> (VolumeData, [Mesh; 
     let base_hash = mesh_hash(&base);
 
     // ── the repaired arm ───────────────────────────────────────────────────
-    let tern = ternary(&field, &base, &prov, &raw, &shape);
+    let tern = ternary(&field, &base, &prov, &raw, &shape, &cfg);
     let mut tern_deg = census(&tern.mesh, &tern.cell, &raw, &shape);
     let tern_report = validate_indexed(&tern.mesh.positions, &tern.mesh.indices, &cfg);
     tern_deg.validator_epsilon = tern_report.degenerate_triangles;
@@ -1747,7 +1722,7 @@ fn report(view: Res<View>, prepared: Res<Prepared>, mut stats: ResMut<DemoStats>
             data.base.degenerate, data.repaired.degenerate, data.base.degenerate_from_equal,
         ),
         format!(
-            "groups    {} collapsed, {} pinches, {} components welded",
+            "groups    {} collapsed, {} pinches, welds up to {} pieces",
             data.collapsed_groups, data.pinch_groups, data.pinch_excess,
         ),
         format!(

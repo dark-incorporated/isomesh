@@ -198,9 +198,11 @@ cargo run --example untouched_spheres --release
 Integer CT data puts samples exactly on the isovalue, and **every** degenerate triangle in the mesh comes
 from one — 58,097 of 58,097 on `bonsai`. The repair removes all of them and **moves no geometry at all**.
 
-It is still only safe on one of the two volumes. On `bonsai` it welds **520 separate components**, because
-516 of 17,201 collapse groups join vertices that share no triangle. **Ship the precondition, not the
-repair** — one union-find decides it before anything changes.
+It is still only safe on one of the two volumes. On `bonsai` 516 of 17,201 collapse groups join vertices
+that share no triangle, joining **up to 520** separate components — an upper bound, since the count is
+summed per group; the components actually merged are 129. **Ship the precondition, not the repair** —
+and it now ships: `isomesh::validate::pinch_census` decides it before anything changes, and this example
+is its consumer rather than its prototype.
 
 ```bash
 cargo run --example pinch_repair --release
