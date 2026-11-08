@@ -1,6 +1,6 @@
 # Experiments that held, and what they buy you
 
-Moved from the root README on 2026-10-31, with its link paths updated and stale Bevy versions corrected, when the README was brought to the [org documentation guide](https://github.com/bevy-coven/.github/blob/main/DOCUMENTATION.md).
+Moved from the root README on 2026-10-31, with its link paths updated and stale Bevy versions corrected, when the README was brought to the [org documentation guide](https://github.com/dark-incorporated/.github/blob/main/DOCUMENTATION.md).
 
 Twenty times, this project wrote down what it expected to measure — and what result would prove it
 wrong — **before running the measurement**. Thirteen of those are enforced by the compiler:

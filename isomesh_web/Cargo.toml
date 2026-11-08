@@ -1,6 +1,6 @@
 [package]
 name = "isomesh_web"
-description = "The wasm module behind bevy-coven.github.io/isomesh's front-page demo. Not published."
+description = "The wasm module behind dark-incorporated.github.io/isomesh's front-page demo. Not published."
 version = "0.0.15"
 edition = "2024"
 rust-version = "1.89"

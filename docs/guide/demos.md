@@ -1,11 +1,11 @@
 # Demos
 
-Moved from the root README on 2026-10-31, with its link paths updated and stale Bevy versions corrected, when the README was brought to the [org documentation guide](https://github.com/bevy-coven/.github/blob/main/DOCUMENTATION.md).
+Moved from the root README on 2026-10-31, with its link paths updated and stale Bevy versions corrected, when the README was brought to the [org documentation guide](https://github.com/dark-incorporated/.github/blob/main/DOCUMENTATION.md).
 
 **[→ The demo page](../../bevy_isomesh/DEMOS.md)** — all 54 examples, each with an animated capture, the
 exact command, its controls, and the finding it demonstrates.
 
-**[→ bevy-coven.github.io/isomesh](https://bevy-coven.github.io/isomesh/)** is the same prose as a site, with
+**[→ dark-incorporated.github.io/isomesh](https://dark-incorporated.github.io/isomesh/)** is the same prose as a site, with
 every clip served from it rather than hotlinked. Eleven of the demos are **playable in the browser** there
 as WebAssembly builds, and the three Phase 21 ones each still print their cross-check against their
 committed CSV to the console. The front page carries a tenth module that is not a Bevy build: `isomesh`

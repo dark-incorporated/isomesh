@@ -3,21 +3,21 @@
 Thirty-nine runnable examples. This page shows what each one looks like, what it proves, and the exact
 line to run it.
 
-**[The hosted version of this page](https://bevy-coven.github.io/isomesh/demos.html)** carries the same clips
+**[The hosted version of this page](https://dark-incorporated.github.io/isomesh/demos.html)** carries the same clips
 in one link, if you would rather send someone a URL than a repository. Eleven of the demos are playable in
 your browser there as WebAssembly builds, and the three Phase 21 ones each still print their cross-check
 against their committed CSV to the console:
-[`game_dig`](https://bevy-coven.github.io/isomesh/play.html?demo=game_dig),
-[`quickstart`](https://bevy-coven.github.io/isomesh/play.html?demo=quickstart),
-[`marching_cubes_tunnel`](https://bevy-coven.github.io/isomesh/play.html?demo=marching_cubes_tunnel),
-[`dual_contouring_cube`](https://bevy-coven.github.io/isomesh/play.html?demo=dual_contouring_cube),
-[`surface_nets_vs_marching_cubes`](https://bevy-coven.github.io/isomesh/play.html?demo=surface_nets_vs_marching_cubes),
-[`game_showcase`](https://bevy-coven.github.io/isomesh/play.html?demo=game_showcase),
-[`game_mirror_dedup`](https://bevy-coven.github.io/isomesh/play.html?demo=game_mirror_dedup),
-[`game_edit_tape_trim`](https://bevy-coven.github.io/isomesh/play.html?demo=game_edit_tape_trim),
-[`shifted_linear_root`](https://bevy-coven.github.io/isomesh/play.html?demo=shifted_linear_root),
-[`hyperdeterminant_cells`](https://bevy-coven.github.io/isomesh/play.html?demo=hyperdeterminant_cells),
-[`tpms_euler`](https://bevy-coven.github.io/isomesh/play.html?demo=tpms_euler).
+[`game_dig`](https://dark-incorporated.github.io/isomesh/play.html?demo=game_dig),
+[`quickstart`](https://dark-incorporated.github.io/isomesh/play.html?demo=quickstart),
+[`marching_cubes_tunnel`](https://dark-incorporated.github.io/isomesh/play.html?demo=marching_cubes_tunnel),
+[`dual_contouring_cube`](https://dark-incorporated.github.io/isomesh/play.html?demo=dual_contouring_cube),
+[`surface_nets_vs_marching_cubes`](https://dark-incorporated.github.io/isomesh/play.html?demo=surface_nets_vs_marching_cubes),
+[`game_showcase`](https://dark-incorporated.github.io/isomesh/play.html?demo=game_showcase),
+[`game_mirror_dedup`](https://dark-incorporated.github.io/isomesh/play.html?demo=game_mirror_dedup),
+[`game_edit_tape_trim`](https://dark-incorporated.github.io/isomesh/play.html?demo=game_edit_tape_trim),
+[`shifted_linear_root`](https://dark-incorporated.github.io/isomesh/play.html?demo=shifted_linear_root),
+[`hyperdeterminant_cells`](https://dark-incorporated.github.io/isomesh/play.html?demo=hyperdeterminant_cells),
+[`tpms_euler`](https://dark-incorporated.github.io/isomesh/play.html?demo=tpms_euler).
 
 Those eleven need **WebGPU**, not WebGL2. `game_dig` offers Marching Cubes on the GPU as one of its eight
 mesher options, Cargo features are per-package, and `bevy_render` gives its `webgpu` feature precedence over
@@ -37,7 +37,7 @@ Everything here is `cargo run --example <name> --release` from this directory. *
 debug meshing is 37–62× slower and you will think something is broken.
 
 ```bash
-git clone https://github.com/bevy-coven/isomesh
+git clone https://github.com/dark-incorporated/isomesh
 cd isomesh/bevy_isomesh
 cargo run --example game_showcase --release
 ```
@@ -295,7 +295,7 @@ cargo run --example subgrid_features --release        # - = thickness · [ ] res
 
 ![The normalised hyperdeterminant magnitude as a per-cell heatmap, with the Delta = 0 stratum in grey](../docs/media/the-hyperdeterminant-in-every-cell.gif)
 
-[`hyperdeterminant_cells`](https://bevy-coven.github.io/isomesh/play.html?demo=hyperdeterminant_cells).
+[`hyperdeterminant_cells`](https://dark-incorporated.github.io/isomesh/play.html?demo=hyperdeterminant_cells).
 `b*b − 4*a*c` at `trilinear.rs:246` **is** Cayley's `2×2×2` hyperdeterminant — 12 terms against 12 at
 degree 4, all three pencil pairings agreeing, the exact-rational deviation `0/1` over 3,481 trials
 (P-127, all three clauses held). The heatmap colours surface cells by
@@ -314,7 +314,7 @@ cargo run --example hyperdeterminant_cells --release
 
 ![Gyroid, Schwarz P and Schwarz D with chi counted from the weld against a prediction derived on the fly](../docs/media/three-periodic-surfaces-with-a-known-topology.gif)
 
-[`tpms_euler`](https://bevy-coven.github.io/isomesh/play.html?demo=tpms_euler).
+[`tpms_euler`](https://dark-incorporated.github.io/isomesh/play.html?demo=tpms_euler).
 Gyroid `χ = −8N³`, Schwarz P `−4N³`, Schwarz D `−16N³` — P-142's C1 and C2 held to the integer, and
 P-145's digital-topology oracle reproduces the gyroid exactly on the fields where the crate had no
 ground truth. The prediction is **derived on the fly** from a seven-half-shift symmetry census rather

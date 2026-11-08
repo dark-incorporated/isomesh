@@ -217,8 +217,8 @@ for doc in "${DOCS[@]}"; do
         [ -n "$ref" ] || continue
         case "$ref" in
         https://img.shields.io/* | https://github.com/*/badge.svg) continue ;;
-        https://raw.githubusercontent.com/bevy-coven/isomesh/main/*)
-            path=${ref#https://raw.githubusercontent.com/bevy-coven/isomesh/main/}
+        https://raw.githubusercontent.com/dark-incorporated/isomesh/main/*)
+            path=${ref#https://raw.githubusercontent.com/dark-incorporated/isomesh/main/}
             ;;
         http*) continue ;;
         /*) path=$ref ;;

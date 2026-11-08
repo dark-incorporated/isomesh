@@ -566,7 +566,7 @@ This is the crate's actual pitch. Not "the meshes look right" — a wrong mesh l
 
 ![The normalised hyperdeterminant magnitude as a per-cell heatmap over gyroid and six more fields](../media/the-hyperdeterminant-in-every-cell.gif)
 
-[`hyperdeterminant_cells`](https://bevy-coven.github.io/isomesh/play.html?demo=hyperdeterminant_cells)
+[`hyperdeterminant_cells`](https://dark-incorporated.github.io/isomesh/play.html?demo=hyperdeterminant_cells)
 walks fourteen reference fields and shows the phase's headline as a picture: `b*b - 4*a*c` at
 `trilinear.rs:246` is **identically Cayley's `2×2×2` hyperdeterminant** (P-127, all three clauses held
 — `symbolic_difference_is_zero` true, 12 terms against 12, all three pencil pairings agreeing, exact
@@ -583,7 +583,7 @@ information is unreachable because `ambiguous = g(case)` makes it a data-process
 
 ![Gyroid, Schwarz P and Schwarz D at N = 1, 2, 3 with chi measured against a derived prediction](../media/three-periodic-surfaces-with-a-known-topology.gif)
 
-[`tpms_euler`](https://bevy-coven.github.io/isomesh/play.html?demo=tpms_euler)
+[`tpms_euler`](https://dark-incorporated.github.io/isomesh/play.html?demo=tpms_euler)
 shows the phase's three χ oracles: gyroid `−8N³`, Schwarz P `−4N³`, Schwarz D `−16N³`, counted from the
 welded extraction and compared against a prediction **derived live from a seven-half-shift symmetry
 census** — which is also why Schwarz P's lattice reads `simple_cubic`: its body-centring operation

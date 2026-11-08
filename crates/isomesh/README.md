@@ -2,7 +2,7 @@
 
 > ⚠️ **Vibe Coded.** Written by AI agents working from a human's direction, covered by tests rather than a line-by-line human review. Read the code before you rely on it for something you care about.
 
-[![crates.io](https://img.shields.io/crates/v/isomesh.svg)](https://crates.io/crates/isomesh) [![docs.rs](https://img.shields.io/docsrs/isomesh)](https://docs.rs/isomesh) [![CI](https://github.com/bevy-coven/isomesh/actions/workflows/ci.yml/badge.svg)](https://github.com/bevy-coven/isomesh/actions/workflows/ci.yml) [![license](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](https://github.com/bevy-coven/isomesh/blob/main/LICENSE-MIT)
+[![crates.io](https://img.shields.io/crates/v/isomesh.svg)](https://crates.io/crates/isomesh) [![docs.rs](https://img.shields.io/docsrs/isomesh)](https://docs.rs/isomesh) [![CI](https://github.com/dark-incorporated/isomesh/actions/workflows/ci.yml/badge.svg)](https://github.com/dark-incorporated/isomesh/actions/workflows/ci.yml) [![license](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](https://github.com/dark-incorporated/isomesh/blob/main/LICENSE-MIT)
 
 **Engine-agnostic isosurface extraction in Rust. Signed distance field in, triangles out.**
 
@@ -13,7 +13,7 @@ and reusable, the scalar type is generic over `f32` and `f64`, and the crate has
 
 `no_std` + `alloc`, unconditionally.
 
-![A ball walking across streamed terrain, chunks loading continuously around it](https://raw.githubusercontent.com/bevy-coven/isomesh/main/docs/media/walking-the-seams.gif)
+![A ball walking across streamed terrain, chunks loading continuously around it](https://raw.githubusercontent.com/dark-incorporated/isomesh/main/docs/media/walking-the-seams.gif)
 
 *Nothing there is pre-baked. Every chunk under that ball was extracted while the camera flew toward it,
 on a background thread, under a frame budget — and the ball is standing on the **triangles**, not on the
@@ -120,7 +120,7 @@ For a chunked world the seam column decides: use `MarchingCubes` or `SubgridMarc
 — two optimisations took Surface Nets at 256³ from 693.8 ms to **162.7 ms** with its IPC going 1.20 to
 **4.09**, and not one triangle changed. Below 32³ Surface Nets is now the *faster* of the two. If you
 ruled out a dual method on speed before that, the reason is gone; see
-[the experiments page](https://github.com/bevy-coven/isomesh/blob/main/docs/experiments.md).
+[the experiments page](https://github.com/dark-incorporated/isomesh/blob/main/docs/experiments.md).
 
 ## Verification
 
@@ -151,7 +151,7 @@ assert!(report.satisfies(SurfaceGate::Closed));   // a solid
 Picking a predicate by intuition instead is how a correct mesh comes to read as broken — which happened
 to a downstream consumer of this crate before the rule was reachable from outside it.
 
-The repository keeps a [`FINDINGS.md`](https://github.com/bevy-coven/isomesh/blob/main/FINDINGS.md) recording what is known and how well — measured here, verified from
+The repository keeps a [`FINDINGS.md`](https://github.com/dark-incorporated/isomesh/blob/main/FINDINGS.md) recording what is known and how well — measured here, verified from
 a primary source, reported, or folklore — including the published figures that failed verification.
 Falsified entries are never deleted, because which *sources* to distrust is worth more than the
 individual fact.
@@ -170,30 +170,30 @@ individual fact.
 
 The demos are worth looking at before the API:
 
-- **[Gameplay](https://github.com/bevy-coven/isomesh/blob/main/docs/demos/gameplay.md)** — streaming a
+- **[Gameplay](https://github.com/dark-incorporated/isomesh/blob/main/docs/demos/gameplay.md)** — streaming a
   world past a camera, walking every chunk seam, digging tunnels, LOD cracks and the transition cells
   that close them
-- **[Algorithms](https://github.com/bevy-coven/isomesh/blob/main/docs/demos/algorithms.md)** — the
+- **[Algorithms](https://github.com/dark-incorporated/isomesh/blob/main/docs/demos/algorithms.md)** — the
   extractors side by side, in one process, on the same grids
-- **[Correctness](https://github.com/bevy-coven/isomesh/blob/main/docs/demos/correctness.md)** — where a
+- **[Correctness](https://github.com/dark-incorporated/isomesh/blob/main/docs/demos/correctness.md)** — where a
   mesh stops being a manifold, and what each repair costs
 
 Bevy integration lives in
-[`bevy_isomesh`](https://github.com/bevy-coven/isomesh/tree/main/bevy_isomesh), in its own workspace so
+[`bevy_isomesh`](https://github.com/dark-incorporated/isomesh/tree/main/bevy_isomesh), in its own workspace so
 that Cargo's feature unification cannot leak Bevy's feature choices into this crate's lockfile.
 
-Full README: <https://github.com/bevy-coven/isomesh>
+Full README: <https://github.com/dark-incorporated/isomesh>
 
 ## Requirements
 
 Rust 1.89, edition 2024.
 
-## Part of the Coven
+## Part of Dark Inc.
 
-`isomesh` is one of the [Bevy Coven](https://github.com/bevy-coven) crates, built in [the isomesh repository](https://github.com/bevy-coven/isomesh). The Cauldron, the Coven's editor, uses it for caves, overhangs and carving: see [use it in the Cauldron](https://bevy-coven.github.io/crates/isomesh.html#use-it-in-the-cauldron).
+`isomesh` is one of the [Dark Inc.](https://github.com/dark-incorporated) crates, built in [the isomesh repository](https://github.com/dark-incorporated/isomesh). The Dark Factory, Dark Inc.'s editor, uses it for caves, overhangs and carving: see [use it in the Dark Factory](https://dark-incorporated.github.io/crates/isomesh.html#use-it-in-the-dark-factory).
 
 ## Who and licence
 
-Maintained by [@Ladvien](https://github.com/Ladvien). Issues go to [github.com/bevy-coven/isomesh/issues](https://github.com/bevy-coven/isomesh/issues); contributions follow the org's [CONTRIBUTING.md](https://github.com/bevy-coven/.github/blob/main/CONTRIBUTING.md).
+Maintained by [@Ladvien](https://github.com/Ladvien). Issues go to [github.com/dark-incorporated/isomesh/issues](https://github.com/dark-incorporated/isomesh/issues); contributions follow the org's [CONTRIBUTING.md](https://github.com/dark-incorporated/.github/blob/main/CONTRIBUTING.md).
 
 MIT OR Apache-2.0.
