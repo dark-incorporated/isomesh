@@ -52,6 +52,8 @@ bevy_mesh = "0.20"
 # write, which is what keeps a CPU-only consumer from compiling the renderer.
 bevy_app = "0.20"
 bevy_ecs = "0.20"
+# `Reflect` for the components the plugin registers (machine plate rule 4).
+bevy_reflect = "0.20"
 bevy_tasks = "0.20"
 
 # The clock. `std::time::Instant::now()` compiles on wasm32-unknown-unknown and
@@ -80,7 +82,9 @@ bevy_platform = { version = "0.20", features = ["web"] }
 # Note the absence of "x11": that is a Linux windowing backend and this project
 # targets macOS/Metal, where `bevy_winit` needs no extra feature flag.
 [dev-dependencies]
-bevy = "0.20"
+# `debug`: `System::name()` is the full type path only with it, which `tests/machine_plate.rs`
+# matches on.
+bevy = { version = "0.20", features = ["debug"] }
 
 # `game_dig` offers Marching Cubes on the GPU as its eighth mesher key, and
 # `game_dig` is the first entry in `scripts/build_web.sh`'s `DEMOS` array -- so

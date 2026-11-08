@@ -56,8 +56,10 @@ use std::time::Duration;
 use bevy_app::{App, Plugin, Update};
 use bevy_asset::{Assets, Handle};
 use bevy_ecs::prelude::*;
+use bevy_ecs::reflect::ReflectComponent;
 use bevy_mesh::Mesh;
 use bevy_platform::time::Instant;
+use bevy_reflect::{Reflect, prelude::ReflectDefault};
 use bevy_tasks::{AsyncComputeTaskPool, Task, block_on, futures_lite::future};
 use tracing::error;
 
@@ -82,7 +84,7 @@ impl<T> VolumeField for T where T: Sdf<Scalar = f32> + Send + Sync + 'static {}
 /// A plain enum rather than a boxed strategy: the set is closed, the choice has
 /// to cross to a worker thread, and naming it in a component keeps the decision
 /// visible in the ECS rather than hidden in a closure.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
 pub enum Extractor {
     /// [`MarchingCubes`](isomesh::marching_cubes::MarchingCubes).
     #[default]
@@ -172,14 +174,22 @@ impl Extractor {
 }
 
 /// A field, a chunk layout, and how to mesh it.
-#[derive(Component, Clone)]
+///
+/// Reflected for the inspector, not for persistence: `layout` and `field` are
+/// `isomesh` and trait-object types that do not reflect, so they are
+/// `#[reflect(ignore)]` and the type has no reflected constructor
+/// (`from_reflect = false`). Insert it from code with [`VoxelVolume::new`].
+#[derive(Component, Clone, Reflect)]
+#[reflect(Component, from_reflect = false)]
 pub struct VoxelVolume {
     /// Where the chunks are.
+    #[reflect(ignore)]
     pub layout: ChunkLayout<f32>,
     /// What to mesh.
     ///
     /// Behind an [`Arc`] because every queued chunk task needs its own handle to
     /// it and the tasks outlive the system that spawned them.
+    #[reflect(ignore)]
     pub field: Arc<dyn VolumeField>,
     /// Which extractor to run.
     pub extractor: Extractor,
@@ -230,9 +240,15 @@ impl VoxelVolume {
 }
 
 /// A chunk of a volume. Lives on its own entity, with the volume as its parent.
-#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+///
+/// Reflected for the inspector only: `id` is an `isomesh` type that does not
+/// reflect, so it is `#[reflect(ignore)]` and the type has no reflected
+/// constructor (`from_reflect = false`).
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Reflect)]
+#[reflect(Component, from_reflect = false)]
 pub struct VoxelChunk {
     /// Which chunk of the volume this is.
+    #[reflect(ignore)]
     pub id: ChunkId,
     /// The volume entity it belongs to.
     pub volume: Entity,
@@ -243,7 +259,8 @@ pub struct VoxelChunk {
 /// Removed when its task is *spawned*, not when the mesh arrives — so a chunk
 /// edited while meshing is re-marked and re-queued, rather than having its edit
 /// silently dropped into a task that started before it.
-#[derive(Component, Clone, Copy, Debug, Default)]
+#[derive(Component, Clone, Copy, Debug, Default, Reflect)]
+#[reflect(Component, Default)]
 pub struct NeedsRemesh;
 
 /// The finished mesh for a chunk.
@@ -259,7 +276,8 @@ pub struct NeedsRemesh;
 ///
 /// Attaching a render component to this is the application's job — see the
 /// module docs.
-#[derive(Component, Clone, Debug)]
+#[derive(Component, Clone, Debug, Reflect)]
+#[reflect(Component)]
 pub struct ChunkMesh(pub Handle<Mesh>);
 
 /// An extraction in flight on the task pool.
@@ -357,6 +375,11 @@ impl Plugin for IsomeshPlugin {
         }
         app.init_resource::<MeshBudget>()
             .init_resource::<MeshStats>()
+            .register_type::<Extractor>()
+            .register_type::<VoxelVolume>()
+            .register_type::<VoxelChunk>()
+            .register_type::<NeedsRemesh>()
+            .register_type::<ChunkMesh>()
             // `spawn` then `apply`, chained: a task spawned this frame cannot
             // have finished, so running them the other way round would simply
             // add a frame of latency to every chunk.

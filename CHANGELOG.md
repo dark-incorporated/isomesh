@@ -8,6 +8,10 @@ bump landing on `main` is the release (`scripts/publish.sh`, version-driven).
 
 ## [Unreleased]
 
+### Changed
+
+- **`bevy_isomesh` meets the family's machine plate.** `VoxelVolume`, `VoxelChunk`, `NeedsRemesh` and `ChunkMesh` derive `Reflect` with `#[reflect(Component)]` and `Extractor` derives `Reflect`; `IsomeshPlugin` registers all five. The `isomesh` types a component holds (`ChunkLayout`, `ChunkId`) and the field trait object are `#[reflect(ignore)]`, so `VoxelVolume` and `VoxelChunk` have no reflected constructor. `IsomeshSystems` already held every system; `tests/machine_plate.rs` now fails when one is outside it. `bevy_isomesh` adds `bevy_reflect` as a dependency.
+
 ## [0.0.15] — 2026-11-06
 
 **isomesh, isomesh-gpu and bevy_isomesh 0.0.15.** A patch release (`cargo semver-checks check-release --release-type minor` passes 202 checks on each crate against its latest published version). `mark_edit`'s `EditReport::dirty_chunks` counts the edit's own chunks, not the caller's queue (issue #13); the mid-extraction edit test can fail (issue #12); the README's attach system follows a re-meshed chunk (issue #16); hard rule 3 names `libm` (issue #14); the repository moved to dark-incorporated. `isomesh-gpu` changes no code and ships at the shared version. **There is no shared 0.0.14:** `isomesh` 0.0.14 is on crates.io (2026-10-31 14:04 UTC), published from `417d3be`, a `release: v0.0.14` commit on `8113e2e` that lives only on the branch `wiggum/stopped-main-20261031-090723` and never reached `main`; `isomesh-gpu` and `bevy_isomesh` 0.0.14 were never published. That `isomesh` 0.0.14 is `main` at `8113e2e`, so it carries #12 and #13 and not #14 or #16. A version is never reused, so this release is 0.0.15.
