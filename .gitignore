@@ -19,3 +19,7 @@ target
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
+
+# omp harness state, including ~150 MB native modules per version.
+# GitHub rejects any blob over 100 MB, so this must never reach the index.
+.omp/
